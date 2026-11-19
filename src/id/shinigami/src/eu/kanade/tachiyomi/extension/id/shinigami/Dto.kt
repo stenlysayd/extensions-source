@@ -13,8 +13,8 @@ class ShinigamiBrowseDto(
 class ShinigamiBrowseDataDto(
     @SerialName("cover_portrait_url") private val coverPortraitUrl: String? = null,
     @SerialName("cover_image_url") private val coverImageUrl: String? = null,
-    @SerialName("manga_id") val mangaId: String? = "",
-    val title: String? = "",
+    @SerialName("manga_id") val mangaId: String,
+    val title: String,
 ) {
     val thumbnail: String?
         get() = coverPortraitUrl?.takeIf { it.isNotBlank() }
@@ -23,8 +23,8 @@ class ShinigamiBrowseDataDto(
 
 @Serializable
 class MetaDto(
-    val page: Int,
-    @SerialName("total_page") val totalPage: Int? = null,
+    @SerialName("has_next") val hasNext: Boolean,
+    @SerialName("next_cursor") val nextCursor: String? = null,
 )
 
 @Serializable
@@ -55,14 +55,34 @@ class TaxonomyItemDto(
 @Serializable
 class ShinigamiChapterListDto(
     @SerialName("data") val chapterList: List<ShinigamiChapterListDataDto>,
+    val meta: MetaDto,
 )
 
 @Serializable
 class ShinigamiChapterListDataDto(
-    @SerialName("release_date") val date: String = "",
-    @SerialName("chapter_title") val title: String = "",
-    @SerialName("chapter_number") val name: Double = 0.0,
-    @SerialName("chapter_id") val chapterId: String = "",
+    @SerialName("release_date") val date: String? = null,
+    @SerialName("chapter_title") val title: String? = null,
+    @SerialName("chapter_number") val number: Double,
+    @SerialName("chapter_id") val chapterId: String,
+)
+
+@Serializable
+class TaxonomyListDto(
+    val data: List<TaxonomyOptionDto>,
+    val meta: MetaDto,
+)
+
+@Serializable
+class TaxonomyOptionDto(
+    val name: String,
+    val slug: String,
+)
+
+@Serializable
+class FilterDataDto(
+    val genres: List<TaxonomyOptionDto>,
+    val themes: List<TaxonomyOptionDto>,
+    val subformats: List<TaxonomyOptionDto>,
 )
 
 @Serializable
