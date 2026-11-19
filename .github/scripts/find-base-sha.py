@@ -80,8 +80,16 @@ def find_base_sha(repo: str, workflow: str, branch: str) -> str:
             break
 
     # Only reached when no successful run exists or none of them is on the branch
-    # anymore (history rewritten). A full rebuild is correct here: publish-repo.py
-    # then replaces the whole index with the build output, so deletions aren't lost.
+    # anymore (history rewritten). Fall back to the fork upstream commit if available
+    # to avoid slamming Maven with 1000+ simultaneous extension builds.
+    upstream_base = "8947c372cd87f546a0b80cb0e4b0a5a8add5ef88"
+    if is_on_branch(upstream_base):
+        print(
+            f"No previous runs found; using initial upstream commit '{upstream_base[:7]}'",
+            file=sys.stderr,
+        )
+        return upstream_base
+
     print(
         f"No successful run on '{branch}' among {seen_runs} runs; "
         "falling back to the empty tree (full rebuild)",
