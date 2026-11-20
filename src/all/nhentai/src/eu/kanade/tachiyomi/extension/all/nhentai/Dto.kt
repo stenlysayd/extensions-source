@@ -105,7 +105,7 @@ private fun galleryManga(id: Int, galleryTitle: String, image: String?): SManga 
 @Serializable
 internal class RandomGallery(val id: Int)
 
-private val titleAffixes = Regex("""\[[^]]*]|\([^)]*\)|\{[^}]*}""")
+private val titleAffixes = Regex("""\[[^\]]*\]|\([^)]*\)|\{[^}]*\}""")
 
 private fun displayTitle(
     id: Int,
