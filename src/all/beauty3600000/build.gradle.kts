@@ -6,7 +6,7 @@ plugins {
 
 keiyoushi {
     name = "3600000 Beauty"
-    versionCode = 2
+    versionCode = 3
     contentWarning = ContentWarning.NSFW
     libVersion = "1.6"
 

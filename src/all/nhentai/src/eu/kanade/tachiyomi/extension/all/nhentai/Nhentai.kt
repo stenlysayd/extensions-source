@@ -61,7 +61,7 @@ abstract class Nhentai :
             else -> ""
         }
 
-    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("User-Agent", "Mihon-NHentai/1.6.65 (https://github.com/stenlysayd/extensions-source)")
+    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("User-Agent", "Mihon-NHentai/1.6.66 (https://github.com/stenlysayd/extensions-source)")
 
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(10, 1.minutes) { it.host == apiHost && it.encodedPath == "/api/v2/search" }
         .rateLimit(15, 1.minutes) {
