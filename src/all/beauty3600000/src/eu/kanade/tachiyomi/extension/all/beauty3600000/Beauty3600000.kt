@@ -32,8 +32,6 @@ abstract class Beauty3600000 : KeiSource() {
     private val popular = GalleryFeed(includePopular = true)
     private val latest = GalleryFeed(includePopular = false)
 
-    override val supportsLatest = true
-
     override suspend fun getPopularManga(page: Int): MangasPage = popular.load(page)
 
     override suspend fun getLatestUpdates(page: Int): MangasPage = latest.load(page)
