@@ -14,21 +14,83 @@ import keiyoushi.source.KeiSource
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.tryParseZonedDateTime
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
+import okhttp3.CacheControl
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.io.IOException
 import java.time.format.DateTimeFormatter
 
 @Source
 abstract class Beauty3600000 : KeiSource() {
 
-    override val supportsLatest = false
+    private val popular = GalleryFeed(includePopular = true)
+    private val latest = GalleryFeed(includePopular = false)
 
-    override suspend fun getPopularManga(page: Int): MangasPage = getSearchMangaList(page, "", FilterList())
+    override val supportsLatest = true
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage = getPopularManga(page)
+    override suspend fun getPopularManga(page: Int): MangasPage = popular.load(page)
+
+    override suspend fun getLatestUpdates(page: Int): MangasPage = latest.load(page)
+
+    private fun archiveUrl(page: Int): String = if (page == 1) "$baseUrl/" else "$baseUrl/page/$page/"
+
+    private inner class GalleryFeed(private val includePopular: Boolean) {
+        private val mutex = Mutex()
+        private val seen = mutableMapOf<String, MutableSet<String?>>()
+        private var lastPage = 0
+        private var lastResult = MangasPage(emptyList(), false)
+        private var nextUrl: String? = null
+
+        suspend fun load(page: Int): MangasPage = mutex.withLock {
+            if (page > 1 && page == lastPage) return@withLock lastResult
+
+            val continuing = page > 1 && page == lastPage + 1
+            var url = if (continuing) nextUrl else archiveUrl(page)
+            val newCovers = mutableMapOf<String, MutableSet<String?>>()
+            val mangas = mutableListOf<SManga>()
+            val visited = mutableSetOf<String>()
+            while (url != null && mangas.isEmpty()) {
+                if (!visited.add(url)) throw IOException("3600000 Beauty returned a repeated next-page link.")
+                var document = client.get(url, Fetch.DOCUMENT).asJsoup()
+                if (document.selectFirst("#main") == null) {
+                    document = client.get(url, Fetch.DOCUMENT, CacheControl.FORCE_NETWORK).asJsoup()
+                }
+                if (document.selectFirst("#main") == null) {
+                    throw IOException("3600000 Beauty returned an empty listing. Try again.")
+                }
+                val archive = document.archiveEntries()
+                val entries = if (includePopular && page == 1 && url == archiveUrl(1)) {
+                    // Bam ranks only the five sidebar entries. Continue with the paginated archive.
+                    document.popularEntries(archive) + archive
+                } else {
+                    archive
+                }
+                for (entry in entries) {
+                    val title = entry.title.lowercase()
+                    // Mirrored posts have different permalinks and image hosts, but share a cover filename.
+                    val cover = entry.thumbnail_url?.toHttpUrlOrNull()?.pathSegments?.lastOrNull()
+                    val covers = newCovers.getOrPut(title) { mutableSetOf() }
+                    if (covers.matches(cover) || (continuing && seen[title].orEmpty().matches(cover))) continue
+                    covers.add(cover)
+                    mangas.add(entry)
+                }
+                url = document.nextArchivePage()
+            }
+            if (!continuing) seen.clear()
+            newCovers.forEach { (title, covers) -> seen.getOrPut(title) { mutableSetOf() }.addAll(covers) }
+            nextUrl = url
+            lastPage = page
+            MangasPage(mangas, hasNextPage = nextUrl != null).also { lastResult = it }
+        }
+
+        private fun Set<String?>.matches(cover: String?): Boolean = cover in this || null in this || (cover == null && isNotEmpty())
+    }
 
     override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         val category = filters.firstInstanceOrNull<Category>()?.let { CATEGORIES[it.state].second }.orEmpty()
@@ -52,16 +114,28 @@ abstract class Beauty3600000 : KeiSource() {
         }.build()
 
         val document = client.get(url, Fetch.DOCUMENT).asJsoup()
-        val entries = document.select(POST_SELECTOR).mapNotNull { post ->
-            val link = post.selectFirst(".entry-title a[href]") ?: return@mapNotNull null
-            SManga.create().apply {
-                title = link.text()
-                setUrlWithoutDomain(link.absUrl("href"))
-                thumbnail_url = post.selectFirst(".blog-entry-content img")?.imageUrl()
-            }
-        }
-        return MangasPage(entries.distinctBy { it.url }, document.selectFirst("#main a.next.page-numbers") != null)
+        return MangasPage(document.archiveEntries().distinctBy { it.url }, document.nextArchivePage() != null)
     }
+
+    private fun Document.archiveEntries(): List<SManga> = select(POST_SELECTOR).mapNotNull { post ->
+        val link = post.selectFirst(".entry-title a[href]") ?: return@mapNotNull null
+        link.toEntry(post.selectFirst(".blog-entry-content img")?.imageUrl())
+    }
+
+    private fun Document.popularEntries(archive: List<SManga>): List<SManga> = select("#bam-popular .bms-post").mapNotNull { post ->
+        val link = post.selectFirst(".bms-title a[href]") ?: return@mapNotNull null
+        val cover = post.selectFirst("img")?.imageUrl()
+            ?: archive.firstOrNull { it.title == link.text() }?.thumbnail_url
+        link.toEntry(cover)
+    }
+
+    private fun Element.toEntry(cover: String?): SManga = SManga.create().apply {
+        title = text()
+        setUrlWithoutDomain(absUrl("href"))
+        thumbnail_url = cover
+    }
+
+    private fun Document.nextArchivePage(): String? = selectFirst("#main a.next.page-numbers[href]")?.absUrl("href")?.takeIf { it.isNotEmpty() }
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
