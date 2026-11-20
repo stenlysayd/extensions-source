@@ -5,15 +5,18 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 @Serializable
 internal class CdnConfig(
     @SerialName("image_servers") val imageServers: List<String>,
     @SerialName("thumb_servers") val thumbServers: List<String>,
 ) {
-    val imageServer get() = imageServers.first()
-    val thumbServer get() = thumbServers.first()
+    fun toServers(origin: String): CdnServers? {
+        val images = imageServers.cdnOrigins(origin)
+        val thumbnails = thumbServers.cdnOrigins(origin)
+        if (images.isEmpty() || thumbnails.isEmpty()) return null
+        return CdnServers(origin, images, thumbnails)
+    }
 }
 
 @Serializable
@@ -25,14 +28,14 @@ internal class GalleryPage(
 @Serializable
 internal class GalleryItem(
     private val id: Int,
-    @SerialName("english_title") private val englishTitle: String,
-    @SerialName("japanese_title") private val japaneseTitle: String? = null,
+    @SerialName("english_title") private val englishTitle: String?,
+    @SerialName("japanese_title") private val japaneseTitle: String?,
     private val thumbnail: String,
 ) {
-    fun toManga(thumbServer: String): SManga = galleryManga(
+    fun toManga(servers: CdnServers, shortTitles: Boolean): SManga = galleryManga(
         id,
-        englishTitle.ifBlank { japaneseTitle.orEmpty().ifBlank { "#$id" } },
-        mediaUrl(thumbServer, thumbnail),
+        displayTitle(id, shortTitles, englishTitle, japaneseTitle),
+        servers.thumbnailUrl(thumbnail, id),
     )
 }
 
@@ -48,10 +51,10 @@ internal class Gallery(
     @SerialName("num_favorites") private val numFavorites: Int,
     val pages: List<GalleryImage> = emptyList(),
 ) {
-    fun toManga(thumbServer: String): SManga = galleryManga(
+    fun toManga(servers: CdnServers, shortTitles: Boolean): SManga = galleryManga(
         id,
-        title.english.ifBlank { title.pretty.ifBlank { title.japanese.orEmpty().ifBlank { "#$id" } } },
-        mediaUrl(thumbServer, cover.path),
+        displayTitle(id, shortTitles, title.english, title.japanese, title.pretty),
+        servers.thumbnailUrl(cover.path, id),
     ).apply {
         val artists = tags.filter { it.type == "artist" }.joinToString { it.name }
         val groups = tags.filter { it.type == "group" }.joinToString { it.name }
@@ -80,7 +83,7 @@ internal class Gallery(
 }
 
 @Serializable
-internal class GalleryTitle(val english: String, val japanese: String? = null, val pretty: String)
+internal class GalleryTitle(val english: String?, val japanese: String?, val pretty: String?)
 
 @Serializable
 internal class GalleryCover(val path: String)
@@ -91,7 +94,7 @@ internal class GalleryImage(val number: Int, val path: String)
 @Serializable
 internal class GalleryTag(val name: String, val type: String)
 
-private fun galleryManga(id: Int, galleryTitle: String, image: String): SManga = SManga.create().apply {
+private fun galleryManga(id: Int, galleryTitle: String, image: String?): SManga = SManga.create().apply {
     url = "/g/$id/"
     title = galleryTitle
     thumbnail_url = image
@@ -99,5 +102,19 @@ private fun galleryManga(id: Int, galleryTitle: String, image: String): SManga =
     update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
 }
 
-internal fun mediaUrl(server: String, path: String): String = path.toHttpUrlOrNull()?.toString()
-    ?: "${server.trimEnd('/')}/${path.trimStart('/')}"
+@Serializable
+internal class RandomGallery(val id: Int)
+
+private val titleAffixes = Regex("""\[[^]]*]|\([^)]*\)|\{[^}]*}""")
+
+private fun displayTitle(
+    id: Int,
+    shorten: Boolean,
+    english: String?,
+    japanese: String?,
+    pretty: String? = null,
+): String {
+    val full = sequenceOf(english, japanese, pretty).firstOrNull { !it.isNullOrBlank() } ?: "#$id"
+    if (!shorten) return full
+    return pretty?.takeIf { it.isNotBlank() } ?: full.replace(titleAffixes, "").trim().ifEmpty { full }
+}
