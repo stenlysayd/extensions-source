@@ -1,0 +1,24 @@
+import io.github.keiyoushi.gradle.api.ContentWarning
+
+plugins {
+    alias(kei.plugins.extension)
+}
+
+keiyoushi {
+    name = "NHentai"
+    versionCode = 64
+    contentWarning = ContentWarning.NSFW
+    libVersion = "1.6"
+
+    listOf("all", "en", "ja", "zh").forEach { sourceLang ->
+        source {
+            lang = sourceLang
+            baseUrl = "https://nhentai.net"
+            if (sourceLang == "all") id = 7309872737163460316L
+        }
+    }
+
+    deeplink {
+        path("/g/..*")
+    }
+}
