@@ -61,7 +61,7 @@ abstract class Nhentai :
             else -> ""
         }
 
-    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("User-Agent", "Mihon-NHentai/1.6.67 (https://github.com/stenlysayd/extensions-source)")
+    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("User-Agent", "Mihon-NHentai/1.6.68 (https://github.com/stenlysayd/extensions-source)")
 
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(10, 1.minutes) { it.host == apiHost && it.encodedPath == "/api/v2/search" }
         .rateLimit(15, 1.minutes) {
@@ -98,7 +98,10 @@ abstract class Nhentai :
         if (lookup != null) {
             return if (page == 1) singleGallery(lookup) else MangasPage(emptyList(), false)
         }
-        if (filters.firstInstanceOrNull<RandomFilter>()?.state == true) {
+        val activeFilters = filters.flatMap { filter ->
+            if (filter is SearchFilterGroup) filter.state else listOf(filter)
+        }
+        if (activeFilters.firstInstanceOrNull<RandomFilter>()?.state == true) {
             if (page != 1) return MangasPage(emptyList(), false)
             val random = apiGet("$apiUrl/galleries/random".toHttpUrl(), fresh = true).parseAs<RandomGallery>()
             return singleGallery(random.id)
@@ -106,18 +109,18 @@ abstract class Nhentai :
 
         val terms = buildList {
             if (keyword.isNotEmpty()) add(keyword)
-            filters.filterIsInstance<TagFilter>().forEach { addAll(it.terms()) }
-            filters.filterIsInstance<ComparisonFilter>().forEach { filter ->
+            activeFilters.filterIsInstance<TagFilter>().forEach { addAll(it.terms()) }
+            activeFilters.filterIsInstance<ComparisonFilter>().forEach { filter ->
                 val value = filter.state.trim()
                 if (value.isNotEmpty()) add("${filter.field}:$value")
             }
         }
-        val offset = filters.firstInstanceOrNull<PageOffset>()?.state?.trim()?.takeUnless { it.isEmpty() }?.let {
+        val offset = activeFilters.firstInstanceOrNull<PageOffset>()?.state?.trim()?.takeUnless { it.isEmpty() }?.let {
             it.toIntOrNull()?.takeIf { number -> number in 0..(Int.MAX_VALUE - page) }
                 ?: throw IOException("Enter a valid non-negative page offset.")
         } ?: 0
         val resultPage = page + offset
-        if (filters.firstInstanceOrNull<FavoritesFilter>()?.state == true) {
+        if (activeFilters.firstInstanceOrNull<FavoritesFilter>()?.state == true) {
             val key = apiKey.ifEmpty { throw IOException("Add an NHentai API key in the extension settings to view favorites.") }
             val url = "$apiUrl/favorites".toHttpUrl().newBuilder()
                 .addQueryParameter("page", resultPage.toString())
@@ -125,7 +128,7 @@ abstract class Nhentai :
                 .build()
             return listGalleries(url, resultPage, key)
         }
-        val sort = filters.firstInstanceOrNull<SortFilter>()?.sort ?: defaultSort
+        val sort = activeFilters.firstInstanceOrNull<SortFilter>()?.sort ?: defaultSort
         val scopedQuery = (terms + languageQuery).filter(String::isNotEmpty).joinToString(" ")
         return search(resultPage, scopedQuery, sort)
     }
@@ -193,21 +196,29 @@ abstract class Nhentai :
 
     override fun getFilterList(data: JsonElement?): FilterList = FilterList(
         SortFilter(defaultSort),
-        Filter.Header("Separate values with commas. Prefix a value with - to exclude it."),
         TagFilter("Tags", "tag"),
-        TagFilter("Artists", "artist"),
-        TagFilter("Groups", "group"),
-        TagFilter("Parodies", "parody"),
-        TagFilter("Characters", "character"),
-        TagFilter("Categories", "category"),
-        TagFilter("Languages", "language"),
-        ComparisonFilter("Pages (e.g. >10)", "pages"),
-        ComparisonFilter("Favorite count (e.g. >=100)", "favorites"),
-        ComparisonFilter("Uploaded (e.g. <7d)", "uploaded"),
-        PageOffset(),
-        Filter.Separator(),
-        FavoritesFilter(),
-        RandomFilter(),
+        Filter.Header("Separate with commas. Use - to exclude."),
+        SearchFilterGroup(
+            "Gallery details",
+            TagFilter("Artists", "artist"),
+            TagFilter("Groups", "group"),
+            TagFilter("Parodies", "parody"),
+            TagFilter("Characters", "character"),
+            TagFilter("Categories", "category"),
+            TagFilter("Languages", "language"),
+        ),
+        SearchFilterGroup(
+            "Search limits",
+            ComparisonFilter("Pages (e.g. >10)", "pages"),
+            ComparisonFilter("Favorite count (e.g. >=100)", "favorites"),
+            ComparisonFilter("Uploaded (e.g. <7d)", "uploaded"),
+            PageOffset(),
+        ),
+        SearchFilterGroup(
+            "Favorites and random",
+            FavoritesFilter(),
+            RandomFilter(),
+        ),
     )
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
@@ -285,6 +296,8 @@ abstract class Nhentai :
             },
         )
     }
+
+    private class SearchFilterGroup(name: String, vararg filters: Filter<*>) : Filter.Group<Filter<*>>(name, filters.asList())
 
     private class TagFilter(name: String, private val field: String) : Filter.Text(name) {
         fun terms(): List<String> = state.split(',').mapNotNull {
