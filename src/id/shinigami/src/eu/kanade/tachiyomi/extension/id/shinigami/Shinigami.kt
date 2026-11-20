@@ -51,7 +51,6 @@ abstract class Shinigami : KeiSource() {
 
     override suspend fun getLatestUpdates(page: Int): MangasPage = fetchMangaList(
         mangaListUrl(page, limit = 20).apply {
-            addQueryParameter("type", "project")
             addQueryParameter("is_update", "true")
             addQueryParameter("sort", "latest")
             addQueryParameter("sort_order", "desc")
