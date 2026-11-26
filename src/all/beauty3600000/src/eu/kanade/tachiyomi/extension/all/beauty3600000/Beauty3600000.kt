@@ -6,11 +6,11 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
 import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.source.KeiSource
+import keiyoushi.source.MangaUpdate
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.tryParseZonedDateTime
@@ -52,15 +52,25 @@ abstract class Beauty3600000 : KeiSource() {
             var url = if (continuing) nextUrl else archiveUrl(page)
             val newCovers = mutableMapOf<String, MutableSet<String?>>()
             val mangas = mutableListOf<SManga>()
+            var skippedEmptyPage = false
             val visited = mutableSetOf<String>()
             while (url != null && mangas.isEmpty()) {
                 if (!visited.add(url)) throw IOException("3600000 Beauty returned a repeated next-page link.")
-                var document = client.get(url, Fetch.DOCUMENT).asJsoup()
+                var document = client.get(url, headers, Fetch.DOCUMENT).asJsoup()
                 if (document.selectFirst("#main") == null) {
-                    document = client.get(url, Fetch.DOCUMENT, CacheControl.FORCE_NETWORK).asJsoup()
+                    document = client.get(url, headers, Fetch.DOCUMENT, CacheControl.FORCE_NETWORK).asJsoup()
                 }
                 if (document.selectFirst("#main") == null) {
-                    throw IOException("3600000 Beauty returned an empty listing. Try again.")
+                    // A numbered archive can occasionally return a zero-byte 200 between valid pages.
+                    val archivePage = url.toHttpUrl().pathSegments.let { parts ->
+                        if (parts.size == 3 && parts.first() == "page") parts[1].toIntOrNull() else null
+                    }
+                    if (!skippedEmptyPage && archivePage != null && document.body().html().isBlank()) {
+                        skippedEmptyPage = true
+                        url = archiveUrl(archivePage + 1)
+                        continue
+                    }
+                    throw IOException("3600000 Beauty returned an unreadable listing. Try again.")
                 }
                 val archive = document.archiveEntries()
                 val entries = if (includePopular && page == 1 && url == archiveUrl(1)) {
@@ -111,7 +121,14 @@ abstract class Beauty3600000 : KeiSource() {
             if (page > 1) addPathSegments("page/$page/")
         }.build()
 
-        val document = client.get(url, Fetch.DOCUMENT).asJsoup()
+        val document = client.get(url, headers, Fetch.DOCUMENT).asJsoup()
+        if (document.selectFirst("#main") == null) {
+            val message = document.text()
+            if (message.contains("Allowed memory size", ignoreCase = true) && message.contains("exhausted", ignoreCase = true)) {
+                throw IOException("Search failed: the 3600000 Beauty server ran out of memory. Try again later.")
+            }
+            throw IOException("Search failed: 3600000 Beauty returned an unreadable page. Try again later.")
+        }
         return MangasPage(document.archiveEntries().distinctBy { it.url }, document.nextArchivePage() != null)
     }
 
@@ -138,7 +155,7 @@ abstract class Beauty3600000 : KeiSource() {
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) return null
 
-        val document = client.get(url, Fetch.DOCUMENT).asJsoup()
+        val document = client.get(url, headers, Fetch.DOCUMENT).asJsoup()
         return document.selectFirst(DETAIL_SELECTOR)?.toManga(document.location())?.apply { initialized = true }
     }
 
@@ -147,8 +164,8 @@ abstract class Beauty3600000 : KeiSource() {
         chapters: List<SChapter>,
         fetchDetails: Boolean,
         fetchChapters: Boolean,
-    ): SMangaUpdate {
-        val document = client.get(getMangaUrl(manga), Fetch.DOCUMENT).asJsoup()
+    ): MangaUpdate {
+        val document = client.get(getMangaUrl(manga), headers, Fetch.DOCUMENT).asJsoup()
         val post = document.selectFirst(DETAIL_SELECTOR) ?: throw Exception("Gallery not found")
         val chapter = SChapter.create().apply {
             url = manga.url
@@ -158,7 +175,7 @@ abstract class Beauty3600000 : KeiSource() {
                 post.selectFirst("time.published")?.attr("datetime"),
             )
         }
-        return SMangaUpdate(post.toManga(document.location()), listOf(chapter))
+        return MangaUpdate(post.toManga(document.location()), listOf(chapter))
     }
 
     private fun Element.toManga(permalink: String): SManga = SManga.create().apply {
@@ -174,7 +191,7 @@ abstract class Beauty3600000 : KeiSource() {
     }
 
     override suspend fun getPageList(chapter: SChapter): List<Page> {
-        val document = client.get(getChapterUrl(chapter), Fetch.DOCUMENT).asJsoup()
+        val document = client.get(getChapterUrl(chapter), headers, Fetch.DOCUMENT).asJsoup()
         val images = document.select("$DETAIL_SELECTOR .entry-content img")
             .mapNotNull { it.imageUrl() }
             .distinct()

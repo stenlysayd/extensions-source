@@ -6,9 +6,9 @@ plugins {
 
 keiyoushi {
     name = "3600000 Beauty"
-    versionCode = 3
+    versionCode = 2004
     contentWarning = ContentWarning.NSFW
-    libVersion = "1.6"
+    libVersion = "1.4"
 
     source {
         baseUrl = "https://3600000.xyz"

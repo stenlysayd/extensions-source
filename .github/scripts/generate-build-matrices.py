@@ -12,7 +12,7 @@ LIB_REGEX = re.compile(r"^lib/(?P<lib>\w+)")
 MODULE_REGEX = re.compile(r"^:src:(?P<lang>\w+):(?P<extension>\w+)$")
 PKG_NAME_REGEX = re.compile(r"""pkgName\s*=\s*["']([^"']+)["']""")
 CORE_FILES_REGEX = re.compile(
-    r"^(common/|compiler/|core/|gradle/|build\.gradle\.kts|gradle\.properties|settings\.gradle\.kts|\.github/scripts/(publish-repo\.py|index))"
+    r"^(common/|compiler/|core14/|core/|gradle/|build\.gradle\.kts|gradle\.properties|settings\.gradle\.kts|\.github/scripts/(publish-repo\.py|index))"
 )
 
 def run_command(command: str) -> str:
@@ -251,6 +251,12 @@ def create_matrix(modules: list[str]) -> dict:
 def main() -> None:
     _, ref = sys.argv
     modules, deleted, lint_modules, is_full_rebuild = get_module_list(ref)
+
+    if published := os.getenv("PUBLISHED_MODULES"):
+        selected = set(published.split())
+        modules = [module for module in modules if module in selected]
+        suffixes = {module.removeprefix(":src:").replace(":", ".") for module in selected}
+        deleted = [suffix for suffix in deleted if suffix in suffixes]
 
     matrix = create_matrix(modules)
 

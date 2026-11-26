@@ -5,15 +5,14 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
 import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
+import keiyoushi.source.MangaUpdate
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonElement
-import keiyoushi.utils.tryParse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonElement
@@ -23,7 +22,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import kotlin.time.Instant
+import java.time.Instant
 
 @Source
 abstract class Shinigami : KeiSource() {
@@ -147,7 +146,7 @@ abstract class Shinigami : KeiSource() {
         val manga = SManga.create().apply {
             this.url = id
         }
-        return getMangaUpdate(manga, emptyList(), fetchDetails = true, fetchChapters = false).manga
+        return getMangaDetails(manga)
     }
 
     override suspend fun fetchMangaUpdate(
@@ -155,15 +154,15 @@ abstract class Shinigami : KeiSource() {
         chapters: List<SChapter>,
         fetchDetails: Boolean,
         fetchChapters: Boolean,
-    ): SMangaUpdate = coroutineScope {
+    ): MangaUpdate = coroutineScope {
         val detailsDeferred = if (fetchDetails) {
-            async { fetchMangaDetails(manga) }
+            async { loadDetails(manga) }
         } else {
             null
         }
 
         val chaptersDeferred = if (fetchChapters) {
-            async { fetchChapterList(manga) }
+            async { loadChapters(manga) }
         } else {
             null
         }
@@ -171,10 +170,10 @@ abstract class Shinigami : KeiSource() {
         val updatedManga = detailsDeferred?.await() ?: manga
         val updatedChapters = chaptersDeferred?.await() ?: chapters
 
-        SMangaUpdate(updatedManga, updatedChapters)
+        MangaUpdate(updatedManga, updatedChapters)
     }
 
-    private suspend fun fetchMangaDetails(manga: SManga): SManga {
+    private suspend fun loadDetails(manga: SManga): SManga {
         val id = storedId(manga.url, "/series/")
         val response = client.get("$apiUrl/manga/detail/$id", apiHeaders, Fetch.XHR)
         val mangaDetailsResponse = response.parseAs<ShinigamiMangaDetailDto>()
@@ -209,7 +208,7 @@ abstract class Shinigami : KeiSource() {
         else -> SManga.UNKNOWN
     }
 
-    private suspend fun fetchChapterList(manga: SManga): List<SChapter> = buildList {
+    private suspend fun loadChapters(manga: SManga): List<SChapter> = buildList {
         val id = storedId(manga.url, "/series/")
         val listUrl = "$apiUrl/chapter/$id/list".toHttpUrl().newBuilder()
             .addQueryParameter("sort_by", "chapter_number")
@@ -232,7 +231,7 @@ abstract class Shinigami : KeiSource() {
     }
 
     private fun chapterFromObject(obj: ShinigamiChapterListDataDto): SChapter = SChapter.create().apply {
-        date_upload = Instant.tryParse(obj.date.orEmpty())
+        date_upload = runCatching { Instant.parse(obj.date).toEpochMilli() }.getOrDefault(0L)
         name = "Chapter ${obj.number.toString().removeSuffix(".0")} ${obj.title.orEmpty()}".trim()
         chapter_number = obj.number.toFloat()
         url = obj.chapterId

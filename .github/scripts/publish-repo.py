@@ -3,6 +3,8 @@ import hashlib
 import html
 import json
 import math
+import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -13,7 +15,7 @@ from google.protobuf import json_format
 
 # Artifacts downloaded from the build jobs: one APK per extension plus the source metadata JSON
 # emitted by each assembleRelease.
-ARTIFACTS_DIR = Path.home() / "apk-artifacts"
+ARTIFACTS_DIR = Path(os.environ.get("APK_ARTIFACTS_DIR", Path.home() / "apk-artifacts"))
 
 # The checked-out `repo` branch we publish into (the working directory).
 REPO_DIR = Path.cwd()
@@ -101,6 +103,16 @@ for info_file in ARTIFACTS_DIR.glob("**/keiyoushi-source-info.json"):
         or release_assets.get(package_name) != content_hash
     )
 
+    if info["extensionLib"] == "1.4":
+        apk_dir = REPO_DIR / "apk"
+        icon_dir = REPO_DIR / "icon"
+        apk_dir.mkdir(exist_ok=True)
+        icon_dir.mkdir(exist_ok=True)
+        if changed or not (apk_dir / apk.name).is_file():
+            shutil.copyfile(apk, apk_dir / apk.name)
+        icon_path = get_icon_url(info["module"], info.get("theme")).removeprefix(ICON_BASE_URL + "/")
+        shutil.copyfile(SOURCE_DIR / icon_path, icon_dir / f"{package_name}.png")
+
     updated_release_assets[package_name] = content_hash
 
     ext = index_pb2.Extension(
@@ -159,11 +171,12 @@ for ext, apk, jar, changed in new_extensions:
         ext.resources.jarUrl = old_resources.jarUrl
 
 # Merge with the already-published index, dropping the deleted/rebuilt modules.
+rebuilt = {ext.packageName for ext, _, _, _ in new_extensions}
 final_extensions = []
 final_extensions.extend(
     ext
     for ext in remote_proto.extensionList.extensions
-    if not full_rebuild
+    if not full_rebuild and ext.packageName not in rebuilt
     and not any(ext.packageName.endswith(f".{module}") for module in to_delete)
 )
 final_extensions.extend(ext for ext, _, _, _ in new_extensions)
@@ -173,10 +186,7 @@ index = index_pb2.Index(
     name="Stenly Extensions",
     badgeLabel="STE",
     signingKey="ebd47468470abe8af66c8a8cc28f26660b064d7c372a5ece1f1593b52c55d70c",
-    contact=index_pb2.Contact(
-        website="https://keiyoushi.github.io",
-        discord="https://discord.gg/3FbCpdKbdY",
-    ),
+    contact=remote_proto.contact,
     extensionList=index_pb2.ExtensionList(extensions=final_extensions),
 )
 
@@ -191,6 +201,24 @@ with REPO_DIR.joinpath("index.json").open("w", encoding="utf-8") as f:
 
 with REPO_DIR.joinpath("index.pb").open("wb") as f:
     f.write(gzip.compress(index.SerializeToString(deterministic=True), mtime=0))
+
+legacy_entries = []
+for ext in final_extensions:
+    if ext.extensionLib != "1.4":
+        continue
+    langs = {source.language for source in ext.sources}
+    filename = ext.resources.apkUrl.rsplit("/", 1)[1]
+    if not (REPO_DIR / "apk" / filename).is_file() or not (REPO_DIR / "icon" / f"{ext.packageName}.png").is_file():
+        raise FileNotFoundError(f"Missing legacy assets for {ext.packageName}")
+    legacy_entries.append({
+        "name": f"Tachiyomi: {ext.name}", "pkg": ext.packageName, "apk": filename,
+        "lang": next(iter(langs)) if len(langs) == 1 else "all",
+        "code": ext.versionCode, "version": ext.versionName,
+        "nsfw": int(ext.contentWarning == index_pb2.CONTENT_WARNING_NSFW),
+        "sources": [{"name": source.name, "lang": source.language, "id": str(source.id),
+                     "baseUrl": source.homeUrl} for source in ext.sources],
+    })
+(REPO_DIR / "index.min.json").write_text(json.dumps(legacy_entries, separators=(",", ":")), encoding="utf-8")
 
 with release_assets_path.open("w", encoding="utf-8") as f:
     json.dump(updated_release_assets, f, indent=2, sort_keys=True)

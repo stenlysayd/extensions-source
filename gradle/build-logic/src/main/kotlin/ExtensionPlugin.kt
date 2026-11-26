@@ -28,6 +28,8 @@ import io.github.keiyoushi.gradle.tasks.CreateExtensionJarTask
 import io.github.keiyoushi.gradle.tasks.GenerateManifestTask
 import io.github.keiyoushi.gradle.tasks.GenerateSourceInfoTask
 import io.github.keiyoushi.gradle.tasks.SignExtensionJarTask
+import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import kotlinx.serialization.json.Json
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -255,14 +257,25 @@ class ExtensionPlugin : Plugin<Project> {
 
         dependencies {
             addProvider("implementation", keiyoushi.theme.map { project(":lib-multisrc:$it") })
-            implementation(project(":core"))
-            compileOnly(libs.bundles.common)
+            addProvider("implementation", keiyoushi.libVersion.map { version ->
+                project(if (version == "1.4") ":core14" else ":core")
+            })
             compileOnly(keiyoushi.libVersion.flatMap { libs.extensionsLib(it) })
             ksp(project(":compiler"))
             lintChecks(project(":lint-rules"))
         }
 
         afterEvaluate {
+            if (keiyoushi.libVersion.get() == "1.4") {
+                // This old SDK references an unavailable JitPack build. The legacy bundle supplies identical Injekt sources.
+                configurations.configureEach { exclude(mapOf("group" to "com.github.inorichi.injekt")) }
+                tasks.withType<KotlinCompile>().configureEach {
+                    compilerOptions.apiVersion.set(KotlinVersion.KOTLIN_2_0)
+                }
+            }
+            dependencies {
+                compileOnly(if (keiyoushi.libVersion.get() == "1.4") libs.bundles.legacy else libs.bundles.common)
+            }
             val specs = keiyoushi.sources.get()
             check(specs.isNotEmpty()) { "At least one source { } block is required" }
 

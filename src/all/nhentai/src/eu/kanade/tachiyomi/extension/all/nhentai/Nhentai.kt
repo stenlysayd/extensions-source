@@ -11,13 +11,13 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
 import keiyoushi.network.DEFAULT_CACHE_CONTROL
 import keiyoushi.network.Fetch
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
+import keiyoushi.source.MangaUpdate
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
@@ -61,7 +61,7 @@ abstract class Nhentai :
             else -> ""
         }
 
-    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("User-Agent", "Mihon-NHentai/1.6.68 (https://github.com/stenlysayd/extensions-source)")
+    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("User-Agent", "Mihon-NHentai/1.4.2069 (https://github.com/stenlysayd/extensions-source)")
 
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(10, 1.minutes) { it.host == apiHost && it.encodedPath == "/api/v2/search" }
         .rateLimit(15, 1.minutes) {
@@ -178,9 +178,9 @@ abstract class Nhentai :
         chapters: List<SChapter>,
         fetchDetails: Boolean,
         fetchChapters: Boolean,
-    ): SMangaUpdate {
+    ): MangaUpdate {
         val gallery = gallery(manga.url)
-        return SMangaUpdate(gallery.toManga(cdnServers(), shortTitles), listOf(gallery.toChapter()))
+        return MangaUpdate(gallery.toManga(cdnServers(), shortTitles), listOf(gallery.toChapter()))
     }
 
     override suspend fun getPageList(chapter: SChapter): List<Page> {

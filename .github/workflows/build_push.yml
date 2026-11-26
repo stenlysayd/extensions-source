@@ -26,6 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  PUBLISHED_MODULES: ":src:all:beauty3600000 :src:all:nhentai :src:id:shinigami"
   CI_CHUNK_SIZE: 80
   IS_PR_CHECK: false
 
@@ -95,16 +96,8 @@ jobs:
 
       - name: Build and lint shared modules
         run: |
-          MODULES=(":core")
-          for dir in lib lib-multisrc; do
-            for build_file in "$dir"/*/build.gradle.kts; do
-              MODULES+=(":${dir}:$(basename "$(dirname "$build_file")")")
-            done
-          done
-
-          # One extension, so that what only extension builds need is cached too
-          extension=$(find src -mindepth 2 -maxdepth 2 -type d | sort | head -n 1)
-          MODULES+=(":${extension//\//:}")
+          read -ra MODULES <<< "$PUBLISHED_MODULES"
+          MODULES+=(":core14")
 
           TASKS=()
           for module in "${MODULES[@]}"; do
@@ -172,19 +165,20 @@ jobs:
   mirror:
     name: Mirror Sync
     needs: build-extensions
-    if: ${{ !cancelled() }}
-    uses: $/.github/workflows/codeberg_mirror.yml
+    if: ${{ !cancelled() && github.repository_owner == 'keiyoushi' }}
+    uses: ./.github/workflows/codeberg_mirror.yml
     secrets:
       CODEBERG_SSH: ${{ secrets.CODEBERG_SSH }}
 
   publish:
     name: Publish extension repo
-    needs: [prepare, build-extensions]
+    needs: [prepare, build-extensions, build]
     # Run whenever there's anything to publish, new/changed builds OR only deletions
     if: >-
       always() &&
       github.repository == 'stenlysayd/extensions-source' &&
       needs.prepare.result == 'success' &&
+      needs.build.result == 'success' &&
       needs.build-extensions.result != 'failure' &&
       needs.build-extensions.result != 'cancelled' &&
       needs.prepare.outputs.delete != '[]'
@@ -230,6 +224,7 @@ jobs:
             git commit -m "Update extensions repo"
             git push
             curl https://purge.jsdelivr.net/gh/stenlysayd/extensions@repo/index.json
+            curl https://purge.jsdelivr.net/gh/stenlysayd/extensions@repo/index.min.json
             curl https://purge.jsdelivr.net/gh/stenlysayd/extensions@repo/index.pb
           else
             echo "No changes to commit"

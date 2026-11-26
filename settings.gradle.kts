@@ -38,6 +38,7 @@ loadAllIndividualExtensions()
  * ===================================== COMMON CONFIGURATION ======================================
  */
 include(":core")
+include(":core14")
 include(":compiler")
 include(":lint-rules")
 

@@ -6,9 +6,9 @@ plugins {
 
 keiyoushi {
     name = "NHentai"
-    versionCode = 68
+    versionCode = 2069
     contentWarning = ContentWarning.NSFW
-    libVersion = "1.6"
+    libVersion = "1.4"
 
     listOf("all", "en", "ja", "zh").forEach { sourceLang ->
         source {
